@@ -57,6 +57,9 @@
   button.primary{background:var(--steel);border-color:var(--steel-dk);color:#fff}button.primary:hover{background:var(--steel-dk)}
   button.amber{background:var(--amber);border-color:var(--amber-dk);color:#fff}button.amber:hover{background:var(--amber-dk)}
   button.ok{background:var(--ok);border-color:#247048;color:#fff}
+  .motbtn{padding:6px 13px;border:1.5px solid var(--line-strong);border-radius:20px;background:var(--surface);color:var(--ink);font-size:12.5px;font-weight:600;cursor:pointer}
+  .motbtn:hover{border-color:var(--wine)}
+  .motbtn.sel{background:var(--wine);border-color:var(--wine-dk);color:#fff}
   button.ghost{border-color:transparent;background:transparent}button.ghost:hover{background:var(--surface-2)}
   button.tiny{padding:5px 10px;font-size:12px}
   button.danger{color:var(--danger);border-color:#e6c3bc}button.danger:hover{background:var(--danger-soft)}
@@ -481,7 +484,16 @@ function openPanel(){const l=getLocal();if(!l){closePanel();return;}const p=$("#
       <div id="lcontf" class="hidden" style="margin-top:12px;background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:11px">
         <p class="sec-label">Contagem física deste local</p>
         <div id="lcontlist"></div>
-        <div class="field" style="margin-top:8px"><input id="lcontobs" placeholder="observação (obrigatória se a contagem for menor)"></div>
+        <div id="lcontmotwrap" style="margin-top:10px">
+          <div class="det" style="font-size:11.5px;margin-bottom:5px">Se a contagem for menor que o sistema, marque o motivo da quebra:</div>
+          <div id="lcontmot" style="display:flex;gap:6px;flex-wrap:wrap">
+            <button type="button" class="motbtn" data-mot="AVARIA">Avaria</button>
+            <button type="button" class="motbtn" data-mot="PERDA">Perda</button>
+            <button type="button" class="motbtn" data-mot="ROUBO">Roubo</button>
+            <button type="button" class="motbtn" data-mot="OUTROS">Outros</button>
+          </div>
+        </div>
+        <div class="field" style="margin-top:8px"><input id="lcontobs" placeholder="detalhe (obrigatório se 'Outros')"></div>
         <button class="primary" id="lcontok" style="width:100%;justify-content:center;margin-top:8px">Confirmar contagem</button>
       </div></div>
     <div class="panel-foot"><button class="danger" id="ldel" style="width:100%;justify-content:center">Excluir local</button></div>`;
@@ -503,12 +515,18 @@ function openPanel(){const l=getLocal();if(!l){closePanel();return;}const p=$("#
     for(const x of itens){const key=insumoKey(x.it.codigo,x.it.detalhe);x.it.qtd-=x.q;if(x.it.qtd<=1e-9)l.insumos.splice(x.idx,1);
       if(key)await gravar('SAÍDAS',{tipo:'Consumo',insumo:key,quantidade:x.q,unid:x.it.unid,servico:serv,quemPegou:quem,observacao:'saída do local: '+pn+' · '+l.nome},"Saída registrada");}
     listIns(l);renderPlan();renderTabs();updateMinAlert();$("#lsaidaf").classList.add("hidden");toast("Saída registrada deste local");};
+  $("#lcontmot").querySelectorAll('.motbtn').forEach(b=>b.onclick=()=>{const on=b.classList.contains('sel');$("#lcontmot").querySelectorAll('.motbtn').forEach(x=>x.classList.remove('sel'));if(!on)b.classList.add('sel');const out=$('#lcontmot .motbtn[data-mot="OUTROS"]').classList.contains('sel');$("#lcontobs").placeholder=out?"descreva o motivo (obrigatório)":"detalhe (opcional)";});
   $("#lcontok").onclick=async ()=>{
-    const obs=($("#lcontobs").value||'').trim();
+    const det=($("#lcontobs").value||'').trim();
+    const motSel=$("#lcontmot").querySelector('.motbtn.sel');const motivo=motSel?motSel.dataset.mot:'';
     const inputs=[...$("#lcontlist").querySelectorAll('input[data-i]')];
     const baixas=[],aplica=[];
     inputs.forEach(inp=>{const idx=+inp.dataset.i,q=numIn(inp.value);if(q===''||q<0)return;const it=l.insumos[idx];if(q<it.qtd-1e-9)baixas.push({it,q});else aplica.push({idx,q});});
-    if(baixas.length&&!obs){toast("Contagem menor que o sistema: observação obrigatória");$("#lcontobs").focus();return;}
+    if(baixas.length){
+      if(!motivo){toast("Marque o motivo da quebra: Avaria, Perda, Roubo ou Outros");return;}
+      if(motivo==='OUTROS'&&!det){toast("Em 'Outros', descreva o motivo");$("#lcontobs").focus();return;}
+    }
+    const obs=motivo?(motivo+(det?' · '+det:'')):det;
     aplica.forEach(a=>{l.insumos[a.idx].qtd=a.q;});
     const pn=(pavimentos.find(p=>p.id===l.pavId)||{}).nome||'';
     l.lastCount=Date.now();listIns(l);$("#lcontf").classList.add("hidden");renderCountStatus(l);
@@ -546,7 +564,7 @@ function qtdNoLocal(id,codigo,detalhe){const l=locais.find(x=>x.id===id);if(!l)r
 function contStatus(l){if(!l.lastCount)return{txt:'nunca contado',overdue:!!l.insumos.length};const dias=Math.floor((Date.now()-l.lastCount)/86400000);return{txt:dias===0?'hoje':'há '+dias+(dias>1?' dias':' dia'),overdue:dias>7};}
 function renderCountStatus(l){const el=$("#lcountStatus");if(!el)return;const st=contStatus(l);el.textContent='Última contagem: '+st.txt;el.style.color=st.overdue?'var(--warn)':'var(--ok)';}
 function buildSaidaList(l){const h=$("#lsaidalist");if(!l.insumos.length){h.innerHTML='<div style="color:var(--muted);font-size:12px">Local vazio — nada para dar saída.</div>';return;}h.innerHTML=l.insumos.map((i,idx)=>`<div style="display:flex;align-items:center;gap:8px;padding:5px 0"><div style="flex:1;font-size:12.5px"><span class="ins-code">${esc(i.codigo)}</span> ${esc(i.nome)} <span class="det">${esc(i.detalhe||'')} · aqui: ${fmt(i.qtd)} ${esc(i.unid||'')}</span></div><input type="number" step="any" min="0" max="${i.qtd}" data-si="${idx}" placeholder="saiu" style="width:80px;border:1px solid var(--line-strong);border-radius:7px;padding:6px 8px;background:var(--surface);color:var(--ink);font-family:var(--mono)"></div>`).join('');}
-function buildContList(l){const h=$("#lcontlist");if(!l.insumos.length){h.innerHTML='<div style="color:var(--muted);font-size:12px">Local vazio — nada para contar.</div>';return;}h.innerHTML=l.insumos.map((i,idx)=>`<div style="display:flex;align-items:center;gap:8px;padding:5px 0"><div style="flex:1;font-size:12.5px"><span class="ins-code">${esc(i.codigo)}</span> ${esc(i.nome)} <span class="det">${esc(i.detalhe||'')}</span></div><input type="number" step="any" min="0" data-i="${idx}" value="${i.qtd}" style="width:80px;border:1px solid var(--line-strong);border-radius:7px;padding:6px 8px;background:var(--surface-2);color:var(--ink);font-family:var(--mono)"></div>`).join('');}
+function buildContList(l){const ob=$("#lcontobs");if(ob){ob.value='';ob.placeholder="detalhe (obrigatório se 'Outros')";}const mw=$("#lcontmot");if(mw)mw.querySelectorAll('.motbtn').forEach(x=>x.classList.remove('sel'));const h=$("#lcontlist");if(!l.insumos.length){h.innerHTML='<div style="color:var(--muted);font-size:12px">Local vazio — nada para contar.</div>';return;}h.innerHTML=l.insumos.map((i,idx)=>`<div style="display:flex;align-items:center;gap:8px;padding:5px 0"><div style="flex:1;font-size:12.5px"><span class="ins-code">${esc(i.codigo)}</span> ${esc(i.nome)} <span class="det">${esc(i.detalhe||'')}</span></div><input type="number" step="any" min="0" data-i="${idx}" value="${i.qtd}" style="width:80px;border:1px solid var(--line-strong);border-radius:7px;padding:6px 8px;background:var(--surface-2);color:var(--ink);font-family:var(--mono)"></div>`).join('');}
 function abaixoMin(){return Object.values(SALDO).filter(i=>MINIMOS[i.insumo]!=null&&i.saldo<MINIMOS[i.insumo]);}
 function updateMinAlert(){const n=abaixoMin().length;const b=$("#saldoAlert");if(b){b.textContent=n;b.classList.toggle("hidden",n===0);}const lb=$("#btnLow");if(lb){lb.classList.toggle("hidden",n===0);const ln=$("#btnLowN");if(ln)ln.textContent='('+n+')';}}
 function lowList(){return abaixoMin().sort((a,b)=>(a.codigo+a.detalhe).localeCompare(b.codigo+b.detalhe,'pt-BR'));}
@@ -904,6 +922,7 @@ function criticidade(){const res=[];
 }
 function isoDate(ts){const d=new Date(ts);return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2);}
 function mesesEntre(de,ate){const out=[];let d=new Date(new Date(de).getFullYear(),new Date(de).getMonth(),1);const fim=new Date(new Date(ate).getFullYear(),new Date(ate).getMonth(),1);let g=0;while(d<=fim&&g<36){out.push(d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2));d=new Date(d.getFullYear(),d.getMonth()+1,1);g++;}return out.length?out:[mesKey(de)];}
+function motivoDe(obs){const m=String(obs||'').split('·')[0].trim().toUpperCase();return ['AVARIA','PERDA','ROUBO','OUTROS'].indexOf(m)>=0?m:'OUTROS';}
 function openIndicadores(per){
   per=per||{preset:'6m'};
   const now=new Date();let de,ate,preset=per.preset||'6m';
@@ -927,11 +946,20 @@ function openIndicadores(per){
   const ativas=FERRAMENTARIA.filter(t=>t.status!=='Descartada'&&t.status!=='Devolvida');
   const stCount=k=>FERRAMENTARIA.filter(t=>t.status===k).length;
   const manutPer=FERRAMENTARIA.reduce((s,t)=>s+((t.manAprovData&&inP(t.manAprovData)&&t.manValor)?t.manValor:0),0);
+  const MOT=['AVARIA','PERDA','ROUBO','OUTROS'];
+  const motCor={AVARIA:'var(--warn)',PERDA:'var(--danger)',ROUBO:'#7a3b8f',OUTROS:'var(--muted)'};
+  const motCap=m=>m[0]+m.slice(1).toLowerCase();
+  const quebras=DATA.saidas.filter(s=>s.tipo==='Baixa local'&&s.status==='Aprovado'&&inP(s.data));
+  const motAgg={};MOT.forEach(m=>motAgg[m]={n:0,qtd:0,val:0});
+  quebras.forEach(s=>{const m=motivoDe(s.obs);const c=SALDO[s.insumo]?SALDO[s.insumo].custo:0;motAgg[m].n++;motAgg[m].qtd+=s.qtd;motAgg[m].val+=s.qtd*c;});
+  const quebraTot=MOT.reduce((a,m)=>a+motAgg[m].val,0);
+  const quebraSegs=MOT.filter(m=>motAgg[m].n>0).map(m=>({label:motCap(m),val:motAgg[m].n,color:motCor[m]}));
   const kpis=[
     {t:'Valor em estoque (atual)',v:kBRL(valEstoque),c:'var(--ok)'},
     {t:'Entradas no período',v:kBRL(entradasPer),c:'var(--steel)'},
     {t:'Consumo no período',v:kBRL(consumoPer),c:'var(--warn)'},
     {t:'Manutenção no período',v:kBRL(manutPer),c:'var(--ink)'},
+    {t:'Quebras no período',v:kBRL(quebraTot),c:quebraTot>0?'var(--danger)':'var(--muted)'},
     {t:'Itens abaixo do mínimo',v:String(abaixoMin.length),c:abaixoMin.length?'var(--danger)':'var(--muted)'},
     {t:'Ferram. em uso / ativas',v:stCount('Em uso')+' / '+ativas.length,c:'var(--steel)'}
   ];
@@ -944,6 +972,7 @@ function openIndicadores(per){
   const vazio=t=>`<div class="empty">${t}</div>`;
   const movChart=chartBarrasAgrupadas(meses,[{label:'Entradas',color:'var(--ok)',vals:meses.map(m=>entradaMes[m])},{label:'Saídas (consumo)',color:'var(--warn)',vals:meses.map(m=>saidaMes[m])}]);
   const crit=criticidade();
+  const quebraBody=quebras.length?(chartDonut(quebraSegs)+'<div style="margin-top:10px">'+MOT.filter(m=>motAgg[m].n>0).map(m=>`<div class="det" style="display:flex;justify-content:space-between;padding:3px 0;font-size:12px"><span><span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${motCor[m]};margin-right:7px;vertical-align:middle"></span>${motCap(m)}</span><span><b style="color:var(--ink)">${motAgg[m].n}x</b> · ${fmt(motAgg[m].qtd)} un · ${kBRL(motAgg[m].val)}</span></div>`).join('')+'</div>'):vazio('Nenhuma quebra aprovada no período.');
   const critItems=crit.slice(0,10).map(r=>({label:r.nome+(r.detalhe?' · '+r.detalhe:''),val:Math.max(r.rupturas,r.abaixoAgora?0.6:0),sub:`${r.rupturas}x abaixo · saldo ${fmt(r.saldo)}/${fmt(r.min)}`,color:r.abaixoAgora?'var(--danger)':'var(--warn)'}));
   const critBody=crit.length?(`<div class="det" style="margin-bottom:9px">Quantas vezes cada item já furou o mínimo ao longo de todo o histórico. <span style="color:var(--danger)">Vermelho</span> = está abaixo agora. Itens no topo merecem estoque de segurança.</div>`+chartBarrasH(critItems)):`<div class="empty">Nenhum produto ficou abaixo do mínimo até agora 👍</div>`;
   const ctl='padding:7px 9px;border:1px solid var(--line-strong);border-radius:8px;background:var(--surface);color:var(--ink);font-size:12.5px';
@@ -965,6 +994,7 @@ function openIndicadores(per){
       ${card('Top materiais por valor em estoque (atual)',topEst.length?chartBarrasH(topEst):vazio('Sem saldo valorado ainda.'))}
       ${card('Top materiais mais consumidos (R$) — período',topCons.length?chartBarrasH(topCons):vazio('Nenhuma saída no período.'))}
     </div>
+    <div style="margin-top:14px">${card('💥 Motivos de quebra de estoque — período'+(quebras.length?` — ${quebras.length} ocorrência(s) · ${kBRL(quebraTot)}`:''),quebraBody)}</div>
     <div style="margin-top:14px">${card('🛒 Produtos críticos para Compras (histórico)'+(crit.length?` — ${crit.length} item(ns)`:''),critBody)}</div>
     </div></div>`);
   $("#indPreset").onchange=()=>{const v=$("#indPreset").value;if(v==='custom')openIndicadores({de,ate,preset:'custom'});else openIndicadores({preset:v});};

@@ -184,6 +184,7 @@ const CONFIG = {
   ABA_ENTRADAS: 'ENTRADAS',
   ABA_SAIDAS: 'SAÍDAS',
   ABA_FERRAMENTAS: 'FERRAMENTAS',
+  ABA_LOCAIS: 'LOCAIS',
   CLIENT_ID: '642150748356-idjpf2djelebe1km017hf56pgldru09o.apps.googleusercontent.com',
   APPS_SCRIPT_URL: 'https://script.google.com/macros/s/AKfycbxZxw-S-CCc36lyynwO2itHQ5dSGXzj0MT1r2UfoIpMWCKRE7IszmwNC-_yXD-0JvK1/exec',
   SUPERIORES: ['construtorazabaleta@gmail.com','christian@zabaleta.com.br']
@@ -261,7 +262,7 @@ const ENTRADAS_EXEMPLO = [
 
 <script>
 /* ===================== estado ===================== */
-let USER=null, SEC_PAV=1, localSel=null, seq=1, lastLowCount=0;
+let USER=null, SEC_PAV=1, localSel=null, seq=1, lastLowCount=0, salvarLocaisT=null, lastLocaisJSON=null;
 let DATA={entradas:[],saidas:[]}, SALDO={}, MINIMOS={}, UNIDS={}, pendingLocal=[], FERRAMENTAS={}, FERRAMENTARIA=[], fseq=1;
 let pavimentos = PAVIMENTOS.map((nome,i)=>({id:"p"+i,nome,planta:PLANTAS[i]||null}));
 let locais=[]; // {id,pavId,nome,x,y,insumos:[{codigo,nome,detalhe,unid,qtd}]}
@@ -304,9 +305,11 @@ async function carregarDados(){
     DATA.entradas=ENTRADAS_EXEMPLO.map(e=>({insumo:e[0],qtd:e[1],unid:e[2],preco:e[3]||0,data:Date.parse('2026-02-05')}));
     DATA.saidas=[]; calcularSaldo(); updateMinAlert(); updateAprovCount(); checkLowPopup(); toast("Entradas de exemplo carregadas"); return;
   }
-  const [ent,sai,fer]=await Promise.all([lerAba(CONFIG.ABA_ENTRADAS),lerAba(CONFIG.ABA_SAIDAS),lerAba(CONFIG.ABA_FERRAMENTAS)]);
+  const [ent,sai,fer,loc]=await Promise.all([lerAba(CONFIG.ABA_ENTRADAS),lerAba(CONFIG.ABA_SAIDAS),lerAba(CONFIG.ABA_FERRAMENTAS),lerAba(CONFIG.ABA_LOCAIS)]);
   DATA.entradas=parseEntradas(ent); DATA.saidas=parseSaidas(sai); calcularSaldo();
   parseFerramentas(fer);
+  parseLocais(loc);
+  renderTabs(); renderPlan();
   const pend=DATA.saidas.filter(s=>s.tipo==='Contagem'&&s.status==='Pendente').length;
   updateAprovCount();
   updateMinAlert();
@@ -342,6 +345,36 @@ function parseFerramentas(rows){
   FERRAMENTARIA=order.map(id=>{const b=byId[id];return Object.assign({},b.estado||{},{id,hist:b.hist});});
   let mx=0;FERRAMENTARIA.forEach(t=>{const n=parseInt(String(t.id).replace(/\D/g,''),10);if(n>mx)mx=n;});fseq=mx+1;
 }
+function parseLocais(rows){
+  if(!rows||rows.length<2){lastLocaisJSON=locaisSnapshot();return;}
+  const head=rows[0].map(h=>String(h).trim());const col=n=>head.findIndex(h=>h.toLowerCase()===n.toLowerCase());
+  const c={pav:col('Pavimento'),local:col('Local'),cod:col('Código'),nome:col('Nome'),det:col('Detalhe'),qtd:col('Quantidade'),unid:col('Unid.'),x:col('PosX'),y:col('PosY'),id:col('BoxID')};
+  const byBox={},order=[];
+  for(let i=1;i<rows.length;i++){const r=rows[i];if(!r)continue;
+    const pavNome=String(r[c.pav]||'').trim(),localNome=String(r[c.local]||'').trim();
+    let bid=c.id>=0?String(r[c.id]||'').trim():''; if(!bid)bid=pavNome+'|'+localNome;
+    if(!pavNome&&!localNome)continue;
+    if(!byBox[bid]){const pv=pavimentos.find(p=>p.nome===pavNome);byBox[bid]={id:bid,pavId:pv?pv.id:pavimentos[0].id,nome:localNome||'Local',x:c.x>=0?(parseFloat(r[c.x])||50):50,y:c.y>=0?(parseFloat(r[c.y])||50):50,insumos:[]};order.push(bid);}
+    const cod=String(r[c.cod]||'').trim();
+    if(cod)byBox[bid].insumos.push({codigo:cod,nome:String(r[c.nome]||''),detalhe:String(r[c.det]||''),unid:String(r[c.unid]||''),qtd:pR(r[c.qtd])});
+  }
+  locais=order.map(b=>byBox[b]);
+  seq=locais.reduce((m,l)=>Math.max(m,(+String(l.id).replace(/\D/g,''))||0),0)+1;
+  lastLocaisJSON=locaisSnapshot();
+}
+function locaisSnapshot(){return JSON.stringify(locais.map(l=>[l.pavId,l.nome,l.x,l.y,l.insumos.map(i=>[i.codigo,i.detalhe,i.qtd,i.unid])]));}
+function salvarLocais(){
+  if(CONFIG.TEST_MODE)return;
+  if(!CONFIG.APPS_SCRIPT_URL||CONFIG.APPS_SCRIPT_URL.startsWith('COLE'))return;
+  if(!USER||!USER.idToken)return;
+  const linhas=[];
+  locais.forEach(l=>{const pn=(pavimentos.find(p=>p.id===l.pavId)||{}).nome||'';
+    if(l.insumos.length)l.insumos.forEach(i=>linhas.push({pavimento:pn,local:l.nome,codigo:i.codigo,nome:i.nome,detalhe:i.detalhe||'',quantidade:i.qtd,unid:i.unid||'',posx:l.x,posy:l.y,boxid:l.id}));
+    else linhas.push({pavimento:pn,local:l.nome,codigo:'',nome:'',detalhe:'',quantidade:'',unid:'',posx:l.x,posy:l.y,boxid:l.id});
+  });
+  try{fetch(CONFIG.APPS_SCRIPT_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify({acao:'salvarLocais',idToken:USER.idToken,linhas})});}catch(e){console.error(e);}
+}
+function agendarSalvarLocais(){if(CONFIG.TEST_MODE)return;const snap=locaisSnapshot();if(snap===lastLocaisJSON)return;clearTimeout(salvarLocaisT);salvarLocaisT=setTimeout(()=>{lastLocaisJSON=locaisSnapshot();salvarLocais();},1200);}
 function calcularSaldo(){
   SALDO={}; const itens={}; const reg=ins=>{if(!itens[ins])itens[ins]=parseInsumo(ins);return itens[ins];};
   DATA.entradas.forEach(e=>reg(e.insumo)); DATA.saidas.forEach(s=>reg(s.insumo));
@@ -376,7 +409,7 @@ function renderPlan(){const p=pav();plan.style.backgroundImage=p.planta?`url(${p
   if(vazio){const d=document.createElement("div");d.className="empty-msg";
     d.innerHTML=`<b>${esc(p.nome)}</b><p>Planta deste pavimento ainda não configurada na programação.</p>`;
     plan.appendChild(d);return;}
-  locais.filter(l=>l.pavId===p.id).forEach(l=>plan.appendChild(marker(l)));}
+  locais.filter(l=>l.pavId===p.id).forEach(l=>plan.appendChild(marker(l)));agendarSalvarLocais();}
 function marker(l){const m=document.createElement("div");m.className="marker"+(localSel===l.id?" sel":"");
   m.style.left=l.x+"%";m.style.top=l.y+"%";m.tabIndex=0;
   const ov=contStatus(l).overdue;
@@ -389,7 +422,7 @@ function drag(m,l){let sx,sy,bx,by;
   m.addEventListener("pointermove",e=>{if(!m.classList.contains("dragging"))return;const r=plan.getBoundingClientRect();
     let nx=Math.max(2,Math.min(98,bx+(e.clientX-sx)/r.width*100)),ny=Math.max(4,Math.min(96,by+(e.clientY-sy)/r.height*100));
     l.x=nx;l.y=ny;m.style.left=nx+"%";m.style.top=ny+"%";if(Math.abs(e.clientX-sx)>3||Math.abs(e.clientY-sy)>3)m.classList.add("__mv");});
-  m.addEventListener("pointerup",e=>{m.classList.remove("dragging");try{m.releasePointerCapture(e.pointerId);}catch(_){}});}
+  m.addEventListener("pointerup",e=>{m.classList.remove("dragging");try{m.releasePointerCapture(e.pointerId);}catch(_){}agendarSalvarLocais();});}
 plan.addEventListener("click",e=>{if(e.target===plan){localSel=null;renderPlan();closePanel();}});
 
 /* painel do local */

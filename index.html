@@ -976,7 +976,11 @@ function esc(s){return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','
 function pR(v){if(typeof v==='number')return v;if(v==null||v==='')return 0;const n=parseFloat(String(v).replace(/\./g,'').replace(',','.'));return isNaN(n)?0:n;}
 function numIn(v){if(v===''||v==null)return '';const n=parseFloat(String(v).replace(',','.'));return isNaN(n)?'':n;}
 function fmt(n){return (Math.round(n*100)/100).toLocaleString('pt-BR');}
-function parseData(v){if(v instanceof Date)return v.getTime();const s=String(v||'').trim();if(!s)return 0;
+function serialParaTs(n){const ms=Math.round((n-25569)*86400000);const d=new Date(ms);return new Date(d.getUTCFullYear(),d.getUTCMonth(),d.getUTCDate(),d.getUTCHours(),d.getUTCMinutes()).getTime();}
+function parseData(v){if(v instanceof Date)return v.getTime();
+  if(typeof v==='number'&&isFinite(v))return (v>20000&&v<80000)?serialParaTs(v):0;
+  const s=String(v||'').trim();if(!s)return 0;
+  if(/^\d+(\.\d+)?$/.test(s)){const n=parseFloat(s);if(n>20000&&n<80000)return serialParaTs(n);}
   let m=s.match(/^(\d{4})-(\d{2})-(\d{2})/);if(m)return new Date(+m[1],+m[2]-1,+m[3],+(s.match(/T(\d{2})/)?.[1]||0),+(s.match(/T\d{2}:(\d{2})/)?.[1]||0)).getTime();
   m=s.match(/^(\d{2})\/(\d{2})\/(\d{4})/);if(m)return new Date(+m[3],+m[2]-1,+m[1]).getTime();const t=Date.parse(s);return isNaN(t)?0:t;}
 let toastT;function toast(msg){const t=$("#toast");t.textContent=msg;t.classList.add("show");clearTimeout(toastT);toastT=setTimeout(()=>t.classList.remove("show"),2600);}

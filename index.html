@@ -613,13 +613,44 @@ function fRow(t){
   const gar=t.origem==='estoque'?(t.garantiaAte?(naGarantia(t)?`<span class="fpill" style="background:var(--ok-soft);color:var(--ok)">garantia até ${dataBR(t.garantiaAte)}</span> `:`<span class="fpill" style="background:var(--surface-2);color:var(--muted)">garantia venceu ${dataBR(t.garantiaAte)}</span> `):`<span class="fpill" style="background:var(--surface-2);color:var(--muted)">sem garantia</span> `):'';
   return `<div class="pend"><div><div class="ins"><span class="code">Nº ${esc(t.numero)}</span> ${esc(t.nome)} ${alug}${gar}<span class="fpill" style="${pill}">${t.status}</span></div>${info}</div><div style="display:flex;gap:6px;flex-wrap:wrap">${acts}<button class="ghost tiny" data-act="hist" data-id="${t.id}">Histórico</button></div></div>`;
 }
+let ferrQ='',ferrF='todas',ferrS='num';
+function ferrFiltradas(){
+  let arr=FERRAMENTARIA.slice();
+  const q=ferrQ.trim().toLowerCase();
+  if(q)arr=arr.filter(t=>[t.numero,t.nome,t.locadora,t.uso&&t.uso.quem,t.uso&&t.uso.pavimento,t.uso&&t.uso.servico,t.manDestino].filter(Boolean).join(' ').toLowerCase().includes(q));
+  if(ferrF==='disp')arr=arr.filter(t=>t.status==='Disponível');
+  else if(ferrF==='uso')arr=arr.filter(t=>t.status==='Em uso');
+  else if(ferrF==='man')arr=arr.filter(t=>t.status==='Manutenção');
+  else if(ferrF==='ativas')arr=arr.filter(t=>t.status!=='Descartada'&&t.status!=='Devolvida');
+  else if(ferrF==='inativas')arr=arr.filter(t=>t.status==='Descartada'||t.status==='Devolvida');
+  const lastEvt=t=>(t.hist&&t.hist.length)?t.hist[t.hist.length-1].data:0;
+  if(ferrS==='nome')arr.sort((a,b)=>String(a.nome).localeCompare(String(b.nome),'pt-BR'));
+  else if(ferrS==='status')arr.sort((a,b)=>String(a.status).localeCompare(String(b.status),'pt-BR')||String(a.numero).localeCompare(String(b.numero),'pt-BR',{numeric:true}));
+  else if(ferrS==='recente')arr.sort((a,b)=>lastEvt(b)-lastEvt(a));
+  else arr.sort((a,b)=>String(a.numero).localeCompare(String(b.numero),'pt-BR',{numeric:true}));
+  return arr;
+}
 function openFerramentaria(){const s=fStats();
-  const rows=FERRAMENTARIA.length?FERRAMENTARIA.map(fRow).join(''):`<div class="empty">Nenhuma ferramenta ainda. Envie uma do estoque ou adicione uma alugada.</div>`;
+  const ctl='padding:7px 9px;border:1px solid var(--line-strong);border-radius:8px;background:var(--surface-2);color:var(--ink);font-size:12.5px';
   modal(`<div class="modal wide"><div class="modal-head"><h2>🔧 Ferramentaria</h2><span class="sub">${s.disp} disp · ${s.uso} em uso · ${s.man} manut.</span><button class="modal-x">✕</button></div>
-    <div class="modal-body"><div style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap"><button class="primary" id="fEnv">Enviar do estoque</button><button id="fAlu">Adicionar alugada</button></div><div style="max-height:56vh;overflow:auto">${rows}</div></div></div>`);
+    <div class="modal-body">
+      <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap"><button class="primary" id="fEnv">Enviar do estoque</button><button id="fAlu">Adicionar alugada</button></div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+        <input class="search" id="fQ" placeholder="Buscar por nº, nome, quem pegou, locadora..." style="flex:1;min-width:160px;margin:0">
+        <select id="fF" style="${ctl}"><option value="todas">Todas</option><option value="ativas">Ativas (em circulação)</option><option value="disp">Disponíveis</option><option value="uso">Em uso</option><option value="man">Manutenção</option><option value="inativas">Descartadas/Devolvidas</option></select>
+        <select id="fS" style="${ctl}"><option value="num">Ordenar: Número</option><option value="nome">Ordenar: Nome</option><option value="status">Ordenar: Status</option><option value="recente">Ordenar: Mais recente</option></select>
+      </div>
+      <div id="fList" style="max-height:52vh;overflow:auto"></div>
+    </div></div>`);
   $("#fEnv").onclick=fEnviarForm;$("#fAlu").onclick=fAlugarForm;
-  document.querySelectorAll('[data-act]').forEach(b=>{b.onclick=()=>{const t=FERRAMENTARIA.find(x=>x.id===b.dataset.id);if(!t)return;const a=b.dataset.act;
-    if(a==='ret')fRetirarForm(t);else if(a==='dev')fDevolver(t);else if(a==='man')fManutForm(t);else if(a==='orc')fOrcamentoForm(t);else if(a==='ret2')fRetornoForm(t);else if(a==='volt')fVoltar(t);else if(a==='bxa')fBaixarForm(t);else if(a==='devloc')fDevolverLocacaoForm(t);else if(a==='hist')fHistorico(t);};});
+  const qEl=$("#fQ"),fEl=$("#fF"),sEl=$("#fS");qEl.value=ferrQ;fEl.value=ferrF;sEl.value=ferrS;
+  const renderF=()=>{ferrQ=qEl.value;ferrF=fEl.value;ferrS=sEl.value;
+    const arr=ferrFiltradas();
+    $("#fList").innerHTML=arr.length?arr.map(fRow).join(''):`<div class="empty">${FERRAMENTARIA.length?'Nenhuma ferramenta encontrada com esse filtro/busca.':'Nenhuma ferramenta ainda. Envie uma do estoque ou adicione uma alugada.'}</div>`;
+    document.querySelectorAll('#fList [data-act]').forEach(b=>{b.onclick=()=>{const t=FERRAMENTARIA.find(x=>x.id===b.dataset.id);if(!t)return;const a=b.dataset.act;
+      if(a==='ret')fRetirarForm(t);else if(a==='dev')fDevolver(t);else if(a==='man')fManutForm(t);else if(a==='orc')fOrcamentoForm(t);else if(a==='ret2')fRetornoForm(t);else if(a==='volt')fVoltar(t);else if(a==='bxa')fBaixarForm(t);else if(a==='devloc')fDevolverLocacaoForm(t);else if(a==='hist')fHistorico(t);};});
+  };
+  qEl.oninput=renderF;fEl.onchange=renderF;sEl.onchange=renderF;renderF();
 }
 function fHistorico(t){const h=(t.hist||[]).slice().sort((a,b)=>b.data-a.data);
   const retiradas=h.filter(e=>e.evento==='Retirada');

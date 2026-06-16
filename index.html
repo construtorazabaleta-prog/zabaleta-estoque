@@ -923,6 +923,8 @@ function criticidade(){const res=[];
 function isoDate(ts){const d=new Date(ts);return d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2)+'-'+('0'+d.getDate()).slice(-2);}
 function mesesEntre(de,ate){const out=[];let d=new Date(new Date(de).getFullYear(),new Date(de).getMonth(),1);const fim=new Date(new Date(ate).getFullYear(),new Date(ate).getMonth(),1);let g=0;while(d<=fim&&g<36){out.push(d.getFullYear()+'-'+('0'+(d.getMonth()+1)).slice(-2));d=new Date(d.getFullYear(),d.getMonth()+1,1);g++;}return out.length?out:[mesKey(de)];}
 function motivoDe(obs){const m=String(obs||'').split('·')[0].trim().toUpperCase();return ['AVARIA','PERDA','ROUBO','OUTROS'].indexOf(m)>=0?m:'OUTROS';}
+function temMotivo(obs){const m=String(obs||'').split('·')[0].trim().toUpperCase();return ['AVARIA','PERDA','ROUBO','OUTROS'].indexOf(m)>=0;}
+function faltaDe(obs){const mm=String(obs||'').match(/falta\s+([\d.,]+)/i);return mm?pR(mm[1]):0;}
 function openIndicadores(per){
   per=per||{preset:'6m'};
   const now=new Date();let de,ate,preset=per.preset||'6m';
@@ -949,9 +951,11 @@ function openIndicadores(per){
   const MOT=['AVARIA','PERDA','ROUBO','OUTROS'];
   const motCor={AVARIA:'var(--warn)',PERDA:'var(--danger)',ROUBO:'#7a3b8f',OUTROS:'var(--muted)'};
   const motCap=m=>m[0]+m.slice(1).toLowerCase();
-  const quebras=DATA.saidas.filter(s=>s.tipo==='Baixa local'&&s.status==='Aprovado'&&inP(s.data));
+  const quebrasBL=DATA.saidas.filter(s=>s.tipo==='Baixa local'&&s.status==='Aprovado'&&inP(s.data));
+  const quebrasCG=DATA.saidas.filter(s=>s.tipo==='Contagem'&&s.status==='Aprovado'&&inP(s.data)&&temMotivo(s.obs));
+  const quebras=quebrasBL.concat(quebrasCG);
   const motAgg={};MOT.forEach(m=>motAgg[m]={n:0,qtd:0,val:0});
-  quebras.forEach(s=>{const m=motivoDe(s.obs);const c=SALDO[s.insumo]?SALDO[s.insumo].custo:0;motAgg[m].n++;motAgg[m].qtd+=s.qtd;motAgg[m].val+=s.qtd*c;});
+  quebras.forEach(s=>{const m=motivoDe(s.obs);const c=SALDO[s.insumo]?SALDO[s.insumo].custo:0;const perda=(s.tipo==='Baixa local')?s.qtd:faltaDe(s.obs);motAgg[m].n++;motAgg[m].qtd+=perda;motAgg[m].val+=perda*c;});
   const quebraTot=MOT.reduce((a,m)=>a+motAgg[m].val,0);
   const quebraSegs=MOT.filter(m=>motAgg[m].n>0).map(m=>({label:motCap(m),val:motAgg[m].n,color:motCor[m]}));
   const kpis=[
@@ -1008,7 +1012,8 @@ $("#btnContagem").onclick=()=>{modal(`<div class="modal"><div class="modal-head"
     <div class="field"><label>Local de armazenagem (filtro)</label><select id="kLocal"><option value="">Todos os locais</option>${localOptionsHtml()}</select></div>
     <div class="field"><label>Insumo</label><input id="kIns" list="kInsDL" placeholder="clique e escolha" autocomplete="off"><datalist id="kInsDL"></datalist><span class="hint" id="kS"></span></div>
     <div class="field"><label>Quantidade contada (física) <span id="kU" class="det"></span></label><input id="kQ" type="number" step="any" min="0" placeholder="0"></div>
-    <div class="field"><label>Observação <span id="kR" class="req hidden">— obrigatória (contado menor que o sistema)</span></label><input id="kO" placeholder="motivo da diferença, se houver"></div>
+    <div id="kmotwrap" style="margin:2px 0 8px"><div class="det" style="font-size:11.5px;margin-bottom:5px">Se a contagem for menor que o sistema, marque o motivo da quebra:</div><div id="kmot" style="display:flex;gap:6px;flex-wrap:wrap"><button type="button" class="motbtn" data-mot="AVARIA">Avaria</button><button type="button" class="motbtn" data-mot="PERDA">Perda</button><button type="button" class="motbtn" data-mot="ROUBO">Roubo</button><button type="button" class="motbtn" data-mot="OUTROS">Outros</button></div></div>
+    <div class="field"><label>Detalhe <span id="kR" class="req hidden">— obrigatório se 'Outros'</span></label><input id="kO" placeholder="detalhe (opcional)"></div>
     <button class="primary" id="kOk" style="width:100%;padding:11px;justify-content:center">Enviar para aprovação</button></div></div>`);
   const rf=()=>{const v=$("#kIns").value,q=numIn($("#kQ").value),s=saldoDe(v),lid=$("#kLocal").value;
     let txt=SALDO[v]?`Saldo no sistema: ${fmt(s)} ${unidDe(v)}`:'';
@@ -1016,9 +1021,16 @@ $("#btnContagem").onclick=()=>{modal(`<div class="modal"><div class="modal-head"
     $("#kS").textContent=txt;$("#kU").textContent=SALDO[v]?'('+unidDe(v)+')':'';
     const menor=SALDO[v]&&q!==''&&q<s;$("#kR").classList.toggle("hidden",!menor);$("#kS").classList.toggle("warn",!!menor);};
   const fillK=()=>{const lid=$("#kLocal").value,opts=lid?insumosNoLocal(lid):itemOptions();$("#kInsDL").innerHTML=opts.map(v=>`<option value="${esc(v)}">`).join('');};
+  $("#kmot").querySelectorAll('.motbtn').forEach(b=>b.onclick=()=>{const on=b.classList.contains('sel');$("#kmot").querySelectorAll('.motbtn').forEach(x=>x.classList.remove('sel'));if(!on)b.classList.add('sel');const out=$('#kmot .motbtn[data-mot="OUTROS"]').classList.contains('sel');$("#kO").placeholder=out?"descreva o motivo (obrigatório)":"detalhe (opcional)";});
   fillK();$("#kLocal").onchange=()=>{fillK();$("#kIns").value="";rf();};$("#kIns").oninput=rf;$("#kQ").oninput=rf;
-  $("#kOk").onclick=async()=>{const insumo=$("#kIns").value.trim(),q=numIn($("#kQ").value),o=$("#kO").value.trim();if(!insumo)return toast("Escolha o insumo");if(q===''||q<0)return toast("Informe a quantidade contada");if(q<saldoDe(insumo)&&!o){toast("Contagem menor: observação obrigatória");$("#kO").focus();return;}
-    await gravar('SAÍDAS',{tipo:'Contagem',insumo,quantidade:q,unid:unidDe(insumo),observacao:o},"Contagem enviada para aprovação");};};
+  $("#kOk").onclick=async()=>{const insumo=$("#kIns").value.trim(),q=numIn($("#kQ").value),det=$("#kO").value.trim();
+    if(!insumo)return toast("Escolha o insumo");if(q===''||q<0)return toast("Informe a quantidade contada");
+    const s=saldoDe(insumo),menor=q<s;
+    const motSel=$("#kmot").querySelector('.motbtn.sel'),motivo=motSel?motSel.dataset.mot:'';
+    if(menor){if(!motivo){toast("Marque o motivo da quebra: Avaria, Perda, Roubo ou Outros");return;}if(motivo==='OUTROS'&&!det){toast("Em 'Outros', descreva o motivo");$("#kO").focus();return;}}
+    const dif=Math.round((s-q)*1000)/1000;
+    const obs=menor?(motivo+' · falta '+fmt(dif)+' '+unidDe(insumo)+(det?' · '+det:'')):det;
+    await gravar('SAÍDAS',{tipo:'Contagem',insumo,quantidade:q,unid:unidDe(insumo),observacao:obs},"Contagem enviada para aprovação");};};
 
 $("#btnEntrada").onclick=()=>{modal(`<div class="modal"><div class="modal-head"><h2>Nova entrada</h2><button class="modal-x">✕</button></div>
   <div class="modal-body"><p class="note">Entrada manual de insumo no estoque (as da nota fiscal entram pela planilha/ERP).</p>
